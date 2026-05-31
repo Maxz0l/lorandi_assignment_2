@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lorandi_assignament_2</name>
+  <version>0.0.0</version>
+  <description>Assignment 2 — UR5 + MoveIt! cube swap with AprilTag detection</description>
+  <maintainer email="enzolorandi1234@gmail.com">Enzo Lorandi</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Python runtime -->
+  <depend>rclpy</depend>
+
+  <!-- Messages standards -->
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <!-- TF2 : transformer les poses caméra → monde -->
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+
+  <!-- AprilTag : type des messages de détection -->
+  <depend>apriltag_msgs</depend>
+
+  <!-- MoveIt! : planification et exécution des mouvements du bras -->
+  <depend>moveit_msgs</depend>
+  <depend>moveit_ros_planning_interface</depend>
+
+  <!-- Actions ROS 2 : interface GripperCommand -->
+  <depend>control_msgs</depend>
+
+  <!-- Vision : détecter la couleur des cubes (extra +3) -->
+  <depend>cv_bridge</depend>
+
+  <!-- Nodes externes lancés par notre launch file (pas compilés ici) -->
+  <exec_depend>apriltag_ros</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

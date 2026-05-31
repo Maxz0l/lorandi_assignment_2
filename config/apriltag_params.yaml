@@ -1,0 +1,29 @@
+/**:
+    ros__parameters:
+        # Famille de tags utilisée dans la simulation
+        family: 36h11
+
+        # Taille des tags imposée par l'énoncé : 0.050 x 0.050 m
+        size: 0.050
+
+        # Méthode de calcul de pose (pnp = plus précis)
+        pose_estimation_method: "pnp"
+
+        # Qualité de détection : 0 = aucune correction de bits acceptée
+        max_hamming: 0
+
+        # Paramètres internes du détecteur AprilTag
+        detector:
+            threads: 4
+            decimate: 2.0
+            blur: 0.0
+            refine: true
+            sharpening: 0.25
+            debug: false
+
+        # IDs des deux tags présents dans la scène
+        # Le node crée automatiquement un TF frame nommé selon `frames`
+        tag:
+            ids:   [1,  10]
+            frames: [tag_1, tag_10]
+            sizes:  [0.050, 0.050]

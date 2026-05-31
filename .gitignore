@@ -1,0 +1,19 @@
+# Colcon build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# PDF du cours
+*.pdf
