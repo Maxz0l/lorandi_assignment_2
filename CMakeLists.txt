@@ -10,6 +10,7 @@ install(PROGRAMS
   scripts/tag_detector_node.py
   scripts/cube_swapper_node.py
   scripts/color_detector_node.py
+  scripts/spawn_gripper_controller.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -20,11 +20,30 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy, ReliabilityPolicy
 
 import tf2_ros
 from apriltag_msgs.msg import AprilTagDetectionArray
-from geometry_msgs.msg import PoseArray
+from geometry_msgs.msg import Pose, PoseArray
 
 TAG_IDS = [1, 10]
 TAG_FRAMES = {1: "tag_1", 10: "tag_10"}
 WORLD_FRAME = "world"
+
+# Couleur du node dans le terminal (tag_detector = vert)
+_GR = "\033[1;32m"
+_RST = "\033[0m"
+
+# ── Calibration empirique de la détection AprilTag (PAR TAG) ─────────────────
+# L'estimation de pose PnP du tag a un biais systématique qui dépend de la
+# position du cube vis-à-vis de la caméra (fixe) : il n'est donc PAS identique
+# pour les deux cubes. Un offset commun laissait le cube rouge ~3 mm décentré,
+# ce qui suffit à rater la prise car la pince Robotiq se ferme de façon
+# asymétrique en Gazebo (seul le knuckle gauche est actionné, le droit ne suit
+# pas le mimic). On applique donc un offset PROPRE À CHAQUE TAG, mesuré le
+# 2026-06-01 contre la vérité-terrain Gazebo, pour centrer chaque cube à <1 mm.
+# (frame du tag = face supérieure du cube ; cube de 0.10 m de haut.)
+#   valeur = vrai sommet du cube − pose détectée  → (dx, dy, dz)
+TAG_CALIB = {
+    1:  (0.0299, 0.0054, -0.0163),   # tag_1  (cube rouge)  @ table1
+    10: (0.0357, 0.0093, -0.0145),   # tag_10 (cube bleu)   @ table2
+}
 
 
 class TagDetectorNode(Node):
@@ -64,9 +83,10 @@ class TagDetectorNode(Node):
         self._detected: dict = {}
         self._done = False  # publie une seule fois
 
-        self.get_logger().info(
-            "TagDetectorNode ready — waiting for tag_1 and tag_10 in TF tree..."
-        )
+        self._say("TagDetectorNode prêt — en attente de tag_1 et tag_10 dans l'arbre TF…")
+
+    def _say(self, msg: str) -> None:
+        self.get_logger().info(f"{_GR}{msg}{_RST}")
 
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -106,16 +126,16 @@ class TagDetectorNode(Node):
             self.get_logger().warn(f"TF extrapolation ({frame}): {e}")
             return
 
-        from geometry_msgs.msg import Pose
+        dx, dy, dz = TAG_CALIB.get(tag_id, (0.0, 0.0, 0.0))
         pose = Pose()
-        pose.position.x = tf.transform.translation.x
-        pose.position.y = tf.transform.translation.y
-        pose.position.z = tf.transform.translation.z
+        pose.position.x = tf.transform.translation.x + dx
+        pose.position.y = tf.transform.translation.y + dy
+        pose.position.z = tf.transform.translation.z + dz
         pose.orientation = tf.transform.rotation
 
         self._detected[tag_id] = pose
-        self.get_logger().info(
-            f"Tag {tag_id} localized in world: "
+        self._say(
+            f"Tag {tag_id} localisé (monde, calibré) : "
             f"x={pose.position.x:.3f}  y={pose.position.y:.3f}  z={pose.position.z:.3f}"
         )
 
@@ -130,9 +150,7 @@ class TagDetectorNode(Node):
 
         self.pub_poses.publish(msg)
         self._done = True
-        self.get_logger().info(
-            "Both cubes localized → /cube_poses published (TRANSIENT_LOCAL)."
-        )
+        self._say("Les 2 cubes localisés → /cube_poses publié → cube_swapper.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

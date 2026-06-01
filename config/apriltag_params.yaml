@@ -1,5 +1,16 @@
 /**:
     ros__parameters:
+        # QoS overrides : force RELIABLE pour correspondre au bridge ros_gz_bridge
+        # (évite les drops de messages image sur WSL2 / DDS loopback)
+        qos_overrides:
+            /rgb_camera/image:
+                subscription:
+                    reliability: reliable
+                    durability: volatile
+            /rgb_camera/camera_info:
+                subscription:
+                    reliability: reliable
+                    durability: volatile
         # Famille de tags utilisée dans la simulation
         family: 36h11
 
