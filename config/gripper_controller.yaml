@@ -1,0 +1,5 @@
+gripper_position_controller:
+  ros__parameters:
+    joints:
+      - robotiq_85_left_knuckle_joint
+    interface_name: position

@@ -9,8 +9,8 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
 
     # ── 1. Simulation du prof ────────────────────────────────────────────────
-    # Lance Gazebo (monde iaslab_ur.sdf), UR5, controllers ros2_control,
-    # bridge caméra (rgb_camera/image + camera_info), et MoveIt! move_group.
+    # Lance Gazebo (iaslab_ur.sdf), UR5, ros2_control, bridge caméra et
+    # MoveIt! move_group + RViz.
     prof_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
@@ -21,13 +21,9 @@ def generate_launch_description():
         )
     )
 
-    # ── 2. Node AprilTag (C++ du prof, configuré par nous) ──────────────────
-    # Souscrit à image_rect + camera_info → détecte les tags → publie /detections
-    # et broadcast TF (tag_1, tag_10) dans le frame de la caméra.
-    #
-    # REMAPPINGS OBLIGATOIRES :
-    #   image_rect   ← le bridge expose rgb_camera/image (pas image_rect)
-    #   camera_info  ← le bridge expose rgb_camera/camera_info
+    # ── 2. Node AprilTag (C++ du prof, notre config YAML) ───────────────────
+    # Souscrit à image_rect + camera_info → détecte les tags → broadcast TF.
+    # REMAPPINGS : le bridge expose rgb_camera/image (pas image_rect).
     apriltag_node = Node(
         package="apriltag_ros",
         executable="apriltag_node",
@@ -40,17 +36,18 @@ def generate_launch_description():
             ])
         ],
         remappings=[
-            ("image_rect",   "rgb_camera/image"),
-            ("camera_info",  "rgb_camera/camera_info"),
+            ("image_rect",  "rgb_camera/image"),
+            ("camera_info", "rgb_camera/camera_info"),
         ],
+        # Le node apriltag inonde le terminal de warnings de synchro
+        # image/camera_info → on ne garde que ses erreurs réelles.
+        arguments=["--ros-args", "--log-level", "apriltag:=ERROR"],
         output="screen",
     )
 
-    # ── 3. Nos nodes Python ──────────────────────────────────────────────────
-
-    # tag_detector_node : lit les détections AprilTag, utilise TF2 pour
-    # convertir les poses du frame caméra vers le frame "world", et publie
-    # les positions des cubes sous forme de PoseStamped sur /cube_poses.
+    # ── 3. tag_detector_node ─────────────────────────────────────────────────
+    # Lit les détections AprilTag, fait la conversion TF caméra→monde,
+    # publie les poses des 2 cubes sur /cube_poses.
     tag_detector = Node(
         package="lorandi_assignament_2",
         executable="tag_detector_node.py",
@@ -58,9 +55,9 @@ def generate_launch_description():
         output="screen",
     )
 
-    # cube_swapper_node : machine à états qui pilote MoveIt! pour réaliser
-    # le swap des deux cubes (pick → place intermédiaire → pick → place → home).
-    # Attend que /cube_poses ait reçu les deux poses avant de démarrer.
+    # ── 4. cube_swapper_node ─────────────────────────────────────────────────
+    # Machine à états pick & place.
+    # Le node charge lui-même la config MoveIt! via MoveItConfigsBuilder.
     cube_swapper = Node(
         package="lorandi_assignament_2",
         executable="cube_swapper_node.py",
@@ -68,9 +65,8 @@ def generate_launch_description():
         output="screen",
     )
 
-    # color_detector_node : souscrit à rgb_camera/image, détecte la couleur
-    # dominante de chaque cube via HSV, affiche le résultat en fin de swap.
-    # (Points bonus +3)
+    # ── 5. color_detector_node ───────────────────────────────────────────────
+    # Détecte la couleur des cubes via HSV après le swap. (Bonus +3 pts)
     color_detector = Node(
         package="lorandi_assignament_2",
         executable="color_detector_node.py",
@@ -78,14 +74,25 @@ def generate_launch_description():
         output="screen",
     )
 
-    # ── Délai : attendre que Gazebo + MoveIt! soient prêts avant nos nodes ──
-    # 10 s est un délai conservateur ; on peut réduire si la machine est rapide.
+    # ── Gripper controller (JointGroupPositionController) ────────────────────
+    # GripperActionController absent sur Jazzy → notre script Python charge
+    # et active un JointGroupPositionController pour robotiq_85_left_knuckle_joint.
+    gripper_spawner = Node(
+        package="lorandi_assignament_2",
+        executable="spawn_gripper_controller.py",
+        name="gripper_controller_spawner",
+        output="screen",
+    )
+
+    # ── Délai avant nos nodes : attendre Gazebo + MoveIt! prêts ─────────────
+    delayed_gripper = TimerAction(period=10.0, actions=[gripper_spawner])
     our_nodes = TimerAction(
-        period=10.0,
+        period=15.0,
         actions=[apriltag_node, tag_detector, cube_swapper, color_detector],
     )
 
     return LaunchDescription([
         prof_launch,
+        delayed_gripper,
         our_nodes,
     ])
