@@ -1,7 +1,7 @@
-# lorandi_assignament_2 — UR5 + MoveIt! AprilTag-guided Cube Swap
+# lorandi_assignament_2 - UR5 + MoveIt! AprilTag-guided Cube Swap
 
-Assignment 2 — Intelligent Robotics 2025/2026, University of Padua
-Author: **Enzo Lorandi** — enzolorandi1234@gmail.com
+Assignment 2 - Intelligent Robotics 2025/2026, University of Padua
+Author: **Enzo Lorandi** - enzolorandi1234@gmail.com
 
 - Demo video: https://youtu.be/ha9ZuNDaH0M
 
@@ -23,8 +23,8 @@ four independent ROS 2 nodes that only communicate through topics and the TF tre
 
 | Node | What it does | Main interfaces |
 |------|--------------|-----------------|
-| `tag_detector_node.py` | Turns the AprilTag detections into cube poses in the `world` frame (with a small per-tag calibration). | in: `/detections`, TF — out: `/cube_poses` (PoseArray, TRANSIENT_LOCAL) |
-| `cube_swapper_node.py` | Core state machine: pick-and-place swap, then return home. | `/move_action`, `/compute_ik`, `/compute_cartesian_path`, `/execute_trajectory`, `/apply_planning_scene`, `/gripper_position_controller/commands` — out: `/swap_done` |
+| `tag_detector_node.py` | Turns the AprilTag detections into cube poses in the `world` frame (with a small per-tag calibration). | in: `/detections`, TF - out: `/cube_poses` (PoseArray, TRANSIENT_LOCAL) |
+| `cube_swapper_node.py` | Core state machine: pick-and-place swap, then return home. | `/move_action`, `/compute_ik`, `/compute_cartesian_path`, `/execute_trajectory`, `/apply_planning_scene`, `/gripper_position_controller/commands` - out: `/swap_done` |
 | `color_detector_node.py` | After the swap, projects each cube onto the image and prints its colour (red/blue). | in: `/rgb_camera/image`, `/rgb_camera/camera_info`, `/cube_poses`, `/swap_done` |
 | `spawn_gripper_controller.py` | One-shot: loads and activates a `JointGroupPositionController` for the gripper at runtime. | `controller_manager` services |
 
@@ -42,8 +42,8 @@ scripts/                    # the 4 node executables (see table above)
 
 ## Dependencies
 
-- ROS 2 (target distribution: **Humble**; developed on Jazzy — see *Known limitations*)
-- The course package `ir_2526` (simulation, UR5/MoveIt! config, AprilTag node) — used unmodified
+- ROS 2 (target distribution: **Humble**; developed on Jazzy - see *Known limitations*)
+- The course package `ir_2526` (simulation, UR5/MoveIt! config, AprilTag node) - used unmodified
 - `apriltag_ros`, MoveIt! 2, `ros2_control` / `controller_manager`
 - `cv_bridge` + OpenCV (colour-detection extra)
 
@@ -65,12 +65,12 @@ my node logs stay readable (each node has its own colour) instead of being burie
 Gazebo / MoveIt! output. The launch order does not matter: my nodes wait on their own until
 the simulation is ready.
 
-**Terminal 1 — the professor's simulation (with RViz):**
+**Terminal 1 - the professor's simulation (with RViz):**
 ```bash
 ros2 launch ir_launch assignment_2.launch.py
 ```
 
-**Terminal 2 — my nodes + the AprilTag node:**
+**Terminal 2 - my nodes + the AprilTag node:**
 ```bash
 ros2 launch lorandi_assignament_2 lorandi_nodes.launch.py
 ```
