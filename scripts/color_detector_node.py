@@ -108,7 +108,7 @@ class ColorDetectorNode(Node):
         # the heavy work so we never block the executor inside a subscription.
         self.create_timer(0.3, self._check_analyze)
 
-        self._say("ColorDetectorNode prêt — rapportera la couleur de chaque cube après l'échange.")
+        self._say("ColorDetectorNode ready — will report each cube's colour after the swap.")
 
     def _say(self, msg: str) -> None:
         self.get_logger().info(f"{_MG}{msg}{_RST}")
@@ -135,7 +135,7 @@ class ColorDetectorNode(Node):
         self._cam_frame = msg.header.frame_id
         self._img_w, self._img_h = msg.width, msg.height
         self._say(
-            f"Intrinsèques caméra reçues (frame '{self._cam_frame}', "
+            f"Camera intrinsics received (frame '{self._cam_frame}', "
             f"{self._img_w}x{self._img_h}, fx={self._fx:.1f})."
         )
 
@@ -161,11 +161,11 @@ class ColorDetectorNode(Node):
                 timeout=Duration(seconds=1.0),
             )
             t = tf.transform.translation
-            return (t.x, t.y, t.z), "TF live (position finale)"
+            return (t.x, t.y, t.z), "live TF (final position)"
         except tf2_ros.TransformException as e:
             if self._cube_poses and len(self._cube_poses.poses) > idx:
                 p = self._cube_poses.poses[idx].position
-                return (p.x, p.y, p.z), "fallback /cube_poses (position d'origine)"
+                return (p.x, p.y, p.z), "fallback /cube_poses (original position)"
             self.get_logger().warn(f"No position for {frame}: {e}")
             return None, None
 
@@ -194,7 +194,7 @@ class ColorDetectorNode(Node):
         x0, x1 = max(0, u - ROI_HALF_PX), min(w, u + ROI_HALF_PX)
         y0, y1 = max(0, v - ROI_HALF_PX), min(h, v + ROI_HALF_PX)
         if x1 <= x0 or y1 <= y0:
-            return "hors champ"
+            return "out of frame"
         roi = self._latest_image[y0:y1, x0:x1]
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         mask_red = (cv2.inRange(hsv, RED_LOWER_1, RED_UPPER_1)
@@ -202,10 +202,10 @@ class ColorDetectorNode(Node):
         mask_blue = cv2.inRange(hsv, BLUE_LOWER, BLUE_UPPER)
         n_red, n_blue = int(np.sum(mask_red > 0)), int(np.sum(mask_blue > 0))
         if n_red > n_blue and n_red > MIN_PIXELS:
-            return f"ROUGE (rouge={n_red}, bleu={n_blue})"
+            return f"RED  (red={n_red}, blue={n_blue})"
         if n_blue > n_red and n_blue > MIN_PIXELS:
-            return f"BLEU  (rouge={n_red}, bleu={n_blue})"
-        return f"indéterminé (rouge={n_red}, bleu={n_blue})"
+            return f"BLUE (red={n_red}, blue={n_blue})"
+        return f"undetermined (red={n_red}, blue={n_blue})"
 
     def _analyze_and_report(self) -> None:
         if self._latest_image is None:
@@ -218,21 +218,21 @@ class ColorDetectorNode(Node):
             return
 
         self._say("=" * 56)
-        self._say("RAPPORT COULEUR DES CUBES (par cube, projection caméra)")
+        self._say("CUBE COLOUR REPORT (per cube, camera projection)")
         for idx, frame in CUBES:
             world_xyz, src = self._tag_world_position(idx, frame)
             if world_xyz is None:
-                self._say(f"  {frame}: position introuvable.")
+                self._say(f"  {frame}: position not found.")
                 continue
             # Aim at the cube body (below the tag) so we sample colour, not the tag.
             body = (world_xyz[0], world_xyz[1], world_xyz[2] - CUBE_HALF_HEIGHT)
             px = self._project(body)
             if px is None:
-                self._say(f"  {frame}: projection impossible.")
+                self._say(f"  {frame}: projection failed.")
                 continue
             colour = self._classify_roi(*px)
             self._say(
-                f"  {frame} → couleur détectée : {colour}  "
+                f"  {frame} → detected colour: {colour}  "
                 f"[px=({px[0]},{px[1]}), {src}]"
             )
         self._say("=" * 56)

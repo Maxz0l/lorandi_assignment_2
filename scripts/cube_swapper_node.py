@@ -37,6 +37,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy, ReliabilityPolicy
 
 import rclpy.duration
 from geometry_msgs.msg import PoseArray, Pose, PoseStamped, Quaternion
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Header, Float64MultiArray
 
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
@@ -108,8 +109,11 @@ HOME_JOINTS = {
 }
 
 GRIPPER_OPEN    = 0.0   # robotiq_85_left_knuckle_joint fully open (gap ≈ 85 mm) — for picking
-GRIPPER_RELEASE = 0.08  # partial open (gap ≈ 76 mm): frees the 60 mm cube WITHOUT flinging
-                        # the fingers wide, so the cube isn't nudged/toppled at release
+GRIPPER_RELEASE = 0.0   # release = fully open (gap ≈ 85 mm). A partial 0.08 (≈76 mm) left only
+                        # ~8 mm clearance per finger and the 60 mm cube stuck to the fingers via
+                        # Gazebo friction (cube B was carried away instead of dropped). Full open
+                        # guarantees loss of contact; the speed-limited knuckle won't fling it, and
+                        # at 85 mm the fingers don't touch a centred 60 mm cube → no topple.
 GRIPPER_CLOSE = 0.62   # firm squeeze on the 2 kg / 60 mm cube (friction-only hold in Gazebo);
                        # 0.8 (full close) crushes/ejects it. Raise if the cube still slips.
 
@@ -180,9 +184,19 @@ class CubeSwapperNode(Node):
         )
         self.pub_done = self.create_publisher(Bool, "/swap_done", latching_qos)
 
+        # ── Live arm configuration (to seed IK from the CURRENT pose) ─────────
+        # Seeding /compute_ik with the arm's real joints (not a fixed 'home' seed)
+        # makes KDL return the IK branch CLOSEST to where the arm actually is →
+        # no elbow-flip / swing-around, and the post-place vertical retreat stays
+        # feasible. /joint_states is published RELIABLE by joint_state_broadcaster.
+        self._latest_joints = None   # dict joint→pos, last full arm snapshot
+        self.sub_joints = self.create_subscription(
+            JointState, "/joint_states", self._on_joint_states, 10
+        )
+
         self._swap_started = False
         self._pending_poses = None   # cached (pos_A, pos_B) until the arm server is ready
-        self._say("CubeSwapperNode prêt — en attente des serveurs d'action MoveIt…")
+        self._say("CubeSwapperNode ready — waiting for MoveIt action servers…")
 
     # ── Logs colorés (cube_swapper = cyan) ──────────────────────────────────
     def _say(self, msg: str) -> None:
@@ -199,7 +213,7 @@ class CubeSwapperNode(Node):
             return
         if self._arm_client.server_is_ready():
             self._servers_ready = True
-            self._say("Serveur MoveIt prêt (bras opérationnel).")
+            self._say("MoveIt server ready (arm operational).")
             # /cube_poses is latched (TRANSIENT_LOCAL): it may already have been
             # received and cached before the server was ready — try to start now.
             self._maybe_start_swap()
@@ -218,8 +232,16 @@ class CubeSwapperNode(Node):
         # server is ALSO ready — this avoids dropping the single latched message
         # when it arrives before the server (startup race).
         self._pending_poses = (msg.poses[0], msg.poses[1])
-        self._say("Reçu /cube_poses (2 cubes) ← tag_detector.")
+        self._say("Received /cube_poses (2 cubes) ← tag_detector.")
         self._maybe_start_swap()
+
+    def _on_joint_states(self, msg: JointState) -> None:
+        """Cache the latest FULL arm joint snapshot (used to seed IK)."""
+        arm = {n: p for n, p in zip(msg.name, msg.position) if n in HOME_JOINTS}
+        if len(arm) == len(HOME_JOINTS):
+            # Atomic reference swap (never mutate in place) → safe to read from
+            # the swap worker thread under the MultiThreadedExecutor.
+            self._latest_joints = arm
 
     def _maybe_start_swap(self) -> None:
         """Launch the swap exactly once, when both poses and arm server are ready.
@@ -266,35 +288,35 @@ class CubeSwapperNode(Node):
             cube_b_dest.orientation = DOWNWARD_QUAT
 
             self._say(
-                f"Plan : A(tag_1) {self._xy(cube_a_pose)} → {self._xy(cube_a_dest)} (table2) | "
+                f"Plan: A(tag_1) {self._xy(cube_a_pose)} → {self._xy(cube_a_dest)} (table2) | "
                 f"B(tag_10) {self._xy(cube_b_pose)} → {self._xy(cube_b_dest)} (table1)"
             )
 
             # Déclare les 2 cubes comme obstacles → OMPL planifie en les évitant
             # (sinon le cube transporté heurte l'autre cube en chemin).
-            self._step("ajout des 2 cubes comme obstacles dans la scène")
+            self._step("adding the 2 cubes as obstacles in the scene")
             self._add_world_cube("cube_a", cube_a_pose)
             self._add_world_cube("cube_b", cube_b_pose)
 
-            self._say("━━ Mouvement 1/2 : cube A (tag_1) table1 → table2 ━━")
+            self._say("━━ Move 1/2: cube A (tag_1) table1 → table2 ━━")
             self._pick(cube_a_pose, attach_id="cube_a")
             self._place(cube_a_dest, detach_id="cube_a")
 
-            self._say("━━ Mouvement 2/2 : cube B (tag_10) table2 → place de A (table1) ━━")
+            self._say("━━ Move 2/2: cube B (tag_10) table2 → A's spot (table1) ━━")
             self._pick(cube_b_pose, attach_id="cube_b")
             self._place(cube_b_dest, detach_id="cube_b")
 
-            self._say("━━ Retour en position initiale (home) ━━")
+            self._say("━━ Returning to initial position (home) ━━")
             self._go_home()
 
-            self._say("✅ Échange terminé ! (A ↔ B)")
+            self._say("✅ Swap complete! (A ↔ B)")
             self.pub_done.publish(Bool(data=True))
-            self._step("publie /swap_done → color_detector")
+            self._step("publishing /swap_done → color_detector")
             # Leave time for DDS to actually deliver the latched /swap_done sample to
             # color_detector_node BEFORE we tear the node down — otherwise the message
             # is dropped and the colour report never fires.
             time.sleep(3.0)
-            self._say("🏁 Bras revenu en position initiale — workflow terminé. Arrêt du node.")
+            self._say("🏁 Arm back at initial position — workflow complete. Shutting down node.")
 
         except Exception as e:
             self.get_logger().error(f"Swap failed: {e}")
@@ -332,29 +354,29 @@ class CubeSwapperNode(Node):
         grasp = self._at_z(cube_top, cube_top.position.z + GRASP_Z_OFFSET)
         lift  = self._at_z(cube_top, cube_top.position.z + LIFT_Z_OFFSET)
 
-        self._step("prise 1/6 : ouverture pince")
+        self._step("pick 1/6: open gripper")
         self._gripper_cmd(GRIPPER_OPEN)
 
-        self._step("prise 2/6 : montée au-dessus du cube (pré-saisie)")
+        self._step("pick 2/6: move above the cube (pre-grasp)")
         self._move_to_pose(pre, "pre-grasp")
         time.sleep(SETTLE_TIME)
 
         # Recentrage XY rectiligne : corrige le petit écart d'arrivée OMPL → la descente
         # qui suit est bien verticale et les doigts n'accrochent pas le cube. (Efficace.)
-        self._step("prise 3/6 : recentrage XY")
+        self._step("pick 3/6: XY re-centring")
         self._move_cartesian(pre, "re-centre XY")
         time.sleep(SETTLE_TIME)
 
-        self._step("prise 4/6 : descente verticale sur le cube")
+        self._step("pick 4/6: vertical descent onto the cube")
         self._move_cartesian(grasp, "grasp descent")
         time.sleep(SETTLE_TIME)        # bras TOTALEMENT arrêté avant de fermer
 
-        self._step("prise 5/6 : fermeture pince")
+        self._step("pick 5/6: close gripper")
         self._gripper_cmd(GRIPPER_CLOSE)
         if attach_id:
             self._attach_cube(attach_id)
 
-        self._step("prise 6/6 : levée")
+        self._step("pick 6/6: lift")
         self._move_cartesian(lift, "lift")
         time.sleep(SETTLE_TIME)
 
@@ -366,17 +388,17 @@ class CubeSwapperNode(Node):
         release = self._at_z(target_top, target_top.position.z + PLACE_Z_OFFSET)
         retreat = self._at_z(target_top, target_top.position.z + PRE_GRASP_Z_OFFSET)
 
-        self._step("dépose 1/3 : positionnement à la hauteur de largage (au-dessus de la cible)")
+        self._step("place 1/3: position at release height (above the target)")
         self._move_to_pose(release, "place")
         time.sleep(SETTLE_TIME)        # bras TOTALEMENT arrêté avant d'ouvrir
 
-        self._step("dépose 2/3 : ouverture pince → largage du cube")
+        self._step("place 2/3: open gripper → release the cube")
         self._gripper_cmd(GRIPPER_RELEASE)
         if detach_id:
             self._detach_cube(detach_id, target_top)
         time.sleep(SETTLE_TIME)        # laisser le cube se poser
 
-        self._step("dépose 3/3 : levée verticale du bras (dégage le cube qu'on vient de poser)")
+        self._step("place 3/3: vertical lift (clears the just-placed cube)")
         self._move_cartesian(retreat, "place retreat (Z up)")
         time.sleep(SETTLE_TIME)
 
@@ -409,7 +431,7 @@ class CubeSwapperNode(Node):
             self._gripper_pub.publish(msg)
             time.sleep(0.1)
         state = "open" if position < 0.1 else "closed"
-        self._step(f"pince → {state} ({position:.2f} rad) [/gripper_position_controller]")
+        self._step(f"gripper → {state} ({position:.2f} rad) [/gripper_position_controller]")
         time.sleep(2.0)  # full-open travel from the closed spawn pose + margin
 
     @staticmethod
@@ -430,18 +452,17 @@ class CubeSwapperNode(Node):
         Angles are normalized to [-π, π] as an extra safety net. Returns a tuple
         (constraints, solution_dict).
 
-        seed_joints: dict joint→angle to seed the IK search. Defaults to 'home'
-        (a known-valid config). Passing the previous waypoint's solution keeps the
-        next waypoint in the SAME IK branch — otherwise KDL can return an
-        elbow-flipped solution and the arm swings around (knocking the cube)
-        instead of descending straight down.
+        seed_joints: dict joint→angle to seed the IK search. When not given, the
+        arm's CURRENT live configuration (/joint_states) is used so KDL returns the
+        IK branch closest to where the arm actually is — otherwise it can return an
+        elbow-flipped solution and the arm swings around (knocking the cube, and
+        leaving it in a stretched config where the vertical retreat is infeasible).
+        Falls back to the 'home' config only before the first /joint_states arrives.
         """
-        from sensor_msgs.msg import JointState
-
         if not self._ik_client.wait_for_service(timeout_sec=5.0):
             raise RuntimeError("IK service /compute_ik not available.")
 
-        seed_map = seed_joints if seed_joints else HOME_JOINTS
+        seed_map = seed_joints or self._latest_joints or HOME_JOINTS
         seed = JointState()
         seed.name     = list(seed_map.keys())
         seed.position = list(seed_map.values())
@@ -592,9 +613,11 @@ class CubeSwapperNode(Node):
         if not done.wait(timeout=90.0):
             raise RuntimeError(f"ExecuteTrajectory result timed out ('{label}').")
         res = result_future.result()
-        if res is not None and res.result.error_code.val != MoveItErrorCodes.SUCCESS:
+        if res is None:
+            raise RuntimeError(f"ExecuteTrajectory '{label}' returned no result (timeout?).")
+        if res.result.error_code.val != MoveItErrorCodes.SUCCESS:
             raise RuntimeError(f"ExecuteTrajectory '{label}' failed (code {res.result.error_code.val}).")
-        self._step(f"trajectoire cartésienne '{label}' exécutée ✓ [/compute_cartesian_path]")
+        self._step(f"cartesian trajectory '{label}' executed ✓ [/compute_cartesian_path]")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Planning-scene attach / detach (so the cube follows the gripper in RViz)
@@ -677,7 +700,7 @@ class CubeSwapperNode(Node):
         if not event.wait(timeout=5.0):
             self.get_logger().warn(f"/apply_planning_scene timed out — '{label}'.")
             return
-        self._step(f"scène de planification : {label} ✓ [/apply_planning_scene]")
+        self._step(f"planning scene: {label} ✓ [/apply_planning_scene]")
 
     def _send_arm_goal(self, constraints: Constraints, label: str = "") -> None:
         """Build and send a MoveGroup action goal; wait for completion."""
@@ -703,6 +726,34 @@ class CubeSwapperNode(Node):
         goal_msg.planning_options.replan_attempts     = 3
         goal_msg.planning_options.replan_delay        = 2.0
 
+        # Retry once on CONTROL_FAILED: the prof's joint_trajectory_controller has a
+        # tight 0.2 rad path tolerance, and a long transit near the arm's reach limit
+        # can exceed it by a hair (PATH_TOLERANCE_VIOLATED → CONTROL_FAILED). The goal
+        # is an absolute JOINT target, so we just let the arm settle and replan from
+        # the (now stationary) current state, then re-execute. The immediate internal
+        # replan (replan=True) fails because the arm isn't settled yet (start tolerance
+        # 0.01) — our dwell fixes that. Mirrors the retry in _move_cartesian.
+        last_err = None
+        for attempt in range(2):
+            code = self._execute_arm_goal_once(goal_msg, label)
+            if code == MoveItErrorCodes.SUCCESS:
+                self._step(
+                    f"arm → '{label}' reached ✓ [/move_action MoveIt]"
+                    + (f" (retry {attempt})" if attempt else "")
+                )
+                return
+            last_err = RuntimeError(f"MoveGroup failed for '{label}' (error code {code}).")
+            if code != MoveItErrorCodes.CONTROL_FAILED:
+                raise last_err   # planning / other errors won't be fixed by re-executing
+            self.get_logger().warn(
+                f"'{label}' aborted by controller (code {code}, path tolerance); "
+                f"letting the arm settle and replanning."
+            )
+            time.sleep(SETTLE_TIME)   # let the controller hold & the arm come to rest
+        raise last_err
+
+    def _execute_arm_goal_once(self, goal_msg, label: str = "") -> int:
+        """Send one MoveGroup goal, wait for completion, return its error code."""
         sent_event = threading.Event()
         future = self._arm_client.send_goal_async(goal_msg)
         future.add_done_callback(lambda _: sent_event.set())
@@ -720,12 +771,9 @@ class CubeSwapperNode(Node):
             raise RuntimeError(f"Arm result timed out ('{label}').")
 
         result = result_future.result()
-        if result is not None:
-            code = result.result.error_code.val
-            if code == MoveItErrorCodes.SUCCESS:
-                self._step(f"bras → '{label}' atteint ✓ [/move_action MoveIt]")
-            else:
-                raise RuntimeError(f"MoveGroup failed for '{label}' (error code {code}).")
+        if result is None:
+            raise RuntimeError(f"MoveGroup returned no result for '{label}' (timeout?).")
+        return result.result.error_code.val
 
     # ──────────────────────────────────────────────────────────────────────────
 

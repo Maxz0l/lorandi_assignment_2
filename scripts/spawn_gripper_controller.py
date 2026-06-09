@@ -61,6 +61,9 @@ def main(args=None):
         req = SetParameters.Request()
         req.parameters = [p_type]
         result = wait_call(executor, node, set_params.call_async(req))
+        if not (result and all(r.successful for r in result.results)):
+            log.error(f"Set controller type failed: {result}")
+            return
         log.info(f"Type set → {CONTROLLER_TYPE}")
 
         # ── 2. Set controller joints / interface_name ──────────────────────
@@ -80,12 +83,18 @@ def main(args=None):
         )
         req2 = SetParameters.Request()
         req2.parameters = [p_joints, p_iface]
-        wait_call(executor, node, set_params.call_async(req2))
+        res2 = wait_call(executor, node, set_params.call_async(req2))
+        if not (res2 and all(r.successful for r in res2.results)):
+            log.error(f"Set joint params failed: {res2}")
+            return
         log.info("Joint params set.")
 
         # ── 3. Load controller ─────────────────────────────────────────────
         load = node.create_client(LoadController, "/controller_manager/load_controller")
-        load.wait_for_service()
+        while not load.wait_for_service(timeout_sec=2.0):
+            if not rclpy.ok():
+                return
+            log.info("  … still waiting for /controller_manager/load_controller")
         req3 = LoadController.Request()
         req3.name = CONTROLLER_NAME
         res3 = wait_call(executor, node, load.call_async(req3))
@@ -128,7 +137,10 @@ def main(args=None):
         conf = node.create_client(
             ConfigureController, "/controller_manager/configure_controller"
         )
-        conf.wait_for_service()
+        while not conf.wait_for_service(timeout_sec=2.0):
+            if not rclpy.ok():
+                return
+            log.info("  … still waiting for /controller_manager/configure_controller")
         req4 = ConfigureController.Request()
         req4.name = CONTROLLER_NAME
         res4 = wait_call(executor, node, conf.call_async(req4))
@@ -141,7 +153,10 @@ def main(args=None):
         switch = node.create_client(
             SwitchController, "/controller_manager/switch_controller"
         )
-        switch.wait_for_service()
+        while not switch.wait_for_service(timeout_sec=2.0):
+            if not rclpy.ok():
+                return
+            log.info("  … still waiting for /controller_manager/switch_controller")
         req5 = SwitchController.Request()
         req5.activate_controllers   = [CONTROLLER_NAME]
         req5.deactivate_controllers = []
@@ -152,7 +167,7 @@ def main(args=None):
         if not (res5 and res5.ok):
             log.error(f"Activate failed: {res5}")
             return
-        log.info(f"{_BL}✓ {CONTROLLER_NAME} activé — pince prête.{_RST}")
+        log.info(f"{_BL}✓ {CONTROLLER_NAME} activated — gripper ready.{_RST}")
 
     finally:
         node.destroy_node()
