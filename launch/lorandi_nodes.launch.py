@@ -6,7 +6,7 @@ bruit de Gazebo / move_group / RViz / ros2_control. Ces derniers sont lancés pa
 prof avec output="screen" : impossible de les faire taire depuis notre launch. On les
 lance donc SÉPARÉMENT, dans un autre terminal :
 
-    Terminal 1 (la simulation, bruyante — à minimiser) :
+    Terminal 1 (la simulation du prof, avec RViz — à minimiser) :
         ros2 launch ir_launch assignment_2.launch.py
 
     Terminal 2 (nos nodes, propre et coloré) :
@@ -15,7 +15,8 @@ lance donc SÉPARÉMENT, dans un autre terminal :
 Nos nodes attendent eux-mêmes que la sim soit prête (services move_group,
 controller_manager, TF des tags), donc l'ordre de lancement est tolérant.
 
-Pour le rendu, lorandi_assignment_2.launch.py lance TOUT en une commande.
+C'est la méthode de rendu : 2 terminaux. Le Terminal 1 est la sim du prof
+TELLE QUELLE (elle inclut déjà RViz) ; le Terminal 2 lance tous nos nodes.
 """
 
 from launch import LaunchDescription

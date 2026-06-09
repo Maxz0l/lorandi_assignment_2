@@ -83,7 +83,7 @@ class TagDetectorNode(Node):
         self._detected: dict = {}
         self._done = False  # publie une seule fois
 
-        self._say("TagDetectorNode prêt — en attente de tag_1 et tag_10 dans l'arbre TF…")
+        self._say("TagDetectorNode ready — waiting for tag_1 and tag_10 in the TF tree…")
 
     def _say(self, msg: str) -> None:
         self.get_logger().info(f"{_GR}{msg}{_RST}")
@@ -135,7 +135,7 @@ class TagDetectorNode(Node):
 
         self._detected[tag_id] = pose
         self._say(
-            f"Tag {tag_id} localisé (monde, calibré) : "
+            f"Tag {tag_id} located (world, calibrated): "
             f"x={pose.position.x:.3f}  y={pose.position.y:.3f}  z={pose.position.z:.3f}"
         )
 
@@ -150,7 +150,7 @@ class TagDetectorNode(Node):
 
         self.pub_poses.publish(msg)
         self._done = True
-        self._say("Les 2 cubes localisés → /cube_poses publié → cube_swapper.")
+        self._say("Both cubes located → /cube_poses published → cube_swapper.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
